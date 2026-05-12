@@ -1,0 +1,72 @@
+name: Test sign Android APK with all inputs
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Java for keytool
+        run: |
+          java -version || true
+          keytool -version || true
+
+      - name: Generate test keystore and dummy APK
+        id: setup
+        run: |
+          # Create release directory
+          mkdir -p /tmp/release
+
+          # Generate a test keystore
+          keytool -genkeypair \
+            -v \
+            -keystore /tmp/test.keystore \
+            -alias testkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -storepass keystorepass \
+            -keypass keypass \
+            -dname "CN=Test, OU=Test, O=Test, L=Test, S=Test, C=US"
+
+          # Create a minimal dummy APK (zip file with required structure)
+          mkdir -p /tmp/apk_build
+          echo "dummy" > /tmp/apk_build/dummy.txt
+          cd /tmp/apk_build && zip -r /tmp/release/app-release-unsigned.apk dummy.txt
+          cd -
+
+          # Encode keystore to base64
+          KEYSTORE_B64=$(base64 -w 0 /tmp/test.keystore)
+          echo "keystore_b64=$KEYSTORE_B64" >> $GITHUB_OUTPUT
+
+      - id: action
+        uses: .
+        with:
+          releaseDirectory: /tmp/release
+          signingKeyBase64: ${{ steps.setup.outputs.keystore_b64 }}
+          alias: testkey
+          keyStorePassword: keystorepass
+          keyPassword: keypass
+
+      - name: Assert signedReleaseFile output is set
+        env:
+          ACTUAL: ${{ steps.action.outputs.signedReleaseFile }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: signedReleaseFile output is empty"
+            exit 1
+          fi
+          echo "PASS: signedReleaseFile=$ACTUAL"
+
+      - name: Assert signed file exists
+        env:
+          SIGNED_FILE: ${{ steps.action.outputs.signedReleaseFile }}
+        run: |
+          echo "Checking file: $SIGNED_FILE"
+          if [ ! -f "$SIGNED_FILE" ]; then
+            echo "FAIL: signed file does not exist at $SIGNED_FILE"
+            exit 1
+          fi
+          echo "PASS: signed file exists"
