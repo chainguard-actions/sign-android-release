@@ -8,17 +8,20 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Java for keytool
-        run: |
-          java -version || true
-          keytool -version || true
+        run: java -version || true
 
-      - name: Generate test keystore and dummy APK
-        id: setup
+      - name: Create test release directory and dummy APK
         run: |
-          # Create release directory
           mkdir -p /tmp/release
+          # Create a minimal valid ZIP (APK is a ZIP file)
+          cd /tmp/release
+          echo "dummy" > dummy.txt
+          zip -j app-release-unsigned.apk dummy.txt
+          ls -la /tmp/release/
 
-          # Generate a test keystore
+      - name: Generate test keystore and encode as base64
+        id: keystore
+        run: |
           keytool -genkeypair \
             -v \
             -keystore /tmp/test.keystore \
@@ -29,14 +32,6 @@ jobs:
             -storepass keystorepass \
             -keypass keypass \
             -dname "CN=Test, OU=Test, O=Test, L=Test, S=Test, C=US"
-
-          # Create a minimal dummy APK (zip file with required structure)
-          mkdir -p /tmp/apk_build
-          echo "dummy" > /tmp/apk_build/dummy.txt
-          cd /tmp/apk_build && zip -r /tmp/release/app-release-unsigned.apk dummy.txt
-          cd -
-
-          # Encode keystore to base64
           KEYSTORE_B64=$(base64 -w 0 /tmp/test.keystore)
           echo "keystore_b64=$KEYSTORE_B64" >> $GITHUB_OUTPUT
 
@@ -44,7 +39,7 @@ jobs:
         uses: .
         with:
           releaseDirectory: /tmp/release
-          signingKeyBase64: ${{ steps.setup.outputs.keystore_b64 }}
+          signingKeyBase64: ${{ steps.keystore.outputs.keystore_b64 }}
           alias: testkey
           keyStorePassword: keystorepass
           keyPassword: keypass
