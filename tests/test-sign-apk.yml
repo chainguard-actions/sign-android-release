@@ -8,41 +8,46 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Java for keytool
-        run: java -version || true
-
-      - name: Create test release directory and dummy APK
         run: |
+          java -version || (apt-get update && apt-get install -y default-jdk)
+
+      - name: Generate test keystore and dummy APK
+        id: setup
+        run: |
+          # Create release directory
           mkdir -p /tmp/release
-          # Create a minimal valid ZIP (APK is a ZIP file)
-          cd /tmp/release
-          echo "dummy" > dummy.txt
-          zip -j app-release-unsigned.apk dummy.txt
-          ls -la /tmp/release/
 
-      - name: Generate test keystore and encode as base64
-        id: keystore
-        run: |
+          # Generate a test keystore
           keytool -genkeypair \
-            -v \
             -keystore /tmp/test.keystore \
             -alias testkey \
             -keyalg RSA \
             -keysize 2048 \
-            -validity 1 \
-            -storepass keystorepass \
-            -keypass keypass \
-            -dname "CN=Test, OU=Test, O=Test, L=Test, S=Test, C=US"
-          KEYSTORE_B64=$(base64 -w 0 /tmp/test.keystore)
-          echo "keystore_b64=$KEYSTORE_B64" >> $GITHUB_OUTPUT
+            -validity 365 \
+            -storepass testStorePass \
+            -keypass testKeyPass \
+            -dname "CN=Test, OU=Test, O=Test, L=Test, S=Test, C=US" \
+            -noprompt
+
+          # Encode keystore to base64
+          KEYSTORE_BASE64=$(base64 -w 0 /tmp/test.keystore)
+          echo "keystore_base64=$KEYSTORE_BASE64" >> $GITHUB_OUTPUT
+
+          # Create a minimal dummy APK (zip file with AndroidManifest.xml placeholder)
+          mkdir -p /tmp/apk_contents
+          echo "dummy" > /tmp/apk_contents/dummy.txt
+          cd /tmp/apk_contents && zip -r /tmp/release/app-release-unsigned.apk . > /dev/null
+          echo "APK created at /tmp/release/app-release-unsigned.apk"
+          ls -la /tmp/release/
 
       - id: action
         uses: .
         with:
           releaseDirectory: /tmp/release
-          signingKeyBase64: ${{ steps.keystore.outputs.keystore_b64 }}
+          signingKeyBase64: ${{ steps.setup.outputs.keystore_base64 }}
           alias: testkey
-          keyStorePassword: keystorepass
-          keyPassword: keypass
+          keyStorePassword: testStorePass
+          keyPassword: testKeyPass
 
       - name: Assert signedReleaseFile output is set
         env:
@@ -59,7 +64,7 @@ jobs:
         env:
           SIGNED_FILE: ${{ steps.action.outputs.signedReleaseFile }}
         run: |
-          echo "Checking file: $SIGNED_FILE"
+          echo "Checking signed file: $SIGNED_FILE"
           if [ ! -f "$SIGNED_FILE" ]; then
             echo "FAIL: signed file does not exist at $SIGNED_FILE"
             exit 1
